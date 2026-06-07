@@ -18,7 +18,7 @@ const RECORD_TYPES = {
 
 const ROLE_PERMISSIONS = {
   QC: { can_review: true, can_submit: true, reviewable_types: ['status_history', 'temperature', 'box'] },
-  KITCHEN: { can_review: false, can_submit: true, reviewable_types: [] },
+  KITCHEN: { can_review: false, can_submit: false, reviewable_types: [] },
   DRIVER: { can_review: false, can_submit: true, reviewable_types: [] },
   STORE: { can_review: false, can_submit: true, reviewable_types: [] }
 };
@@ -149,7 +149,7 @@ async function submitCorrection(correctionData) {
   } = correctionData;
 
   if (!ROLE_PERMISSIONS[applicant_type]?.can_submit) {
-    throw new AppError(`角色 ${applicant_type} 没有提交更正申请的权限`);
+    throw new AppError(`角色 ${applicant_type} 没有提交更正申请的权限，可提交角色：DRIVER/STORE/QC`, 403);
   }
 
   const box = await get('SELECT * FROM boxes WHERE box_no = ?', [box_no]);
@@ -276,7 +276,7 @@ async function reviewCorrection(correctionId, reviewData) {
   const { reviewer, reviewer_type, review_result, review_reason } = reviewData;
 
   if (!ROLE_PERMISSIONS[reviewer_type]?.can_review) {
-    throw new AppError(`角色 ${reviewer_type} 没有审核更正申请的权限`);
+    throw new AppError(`角色 ${reviewer_type} 没有审核更正申请的权限，可审核角色：QC`, 403);
   }
 
   if (!['APPROVED', 'REJECTED'].includes(review_result)) {

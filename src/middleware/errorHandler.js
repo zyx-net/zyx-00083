@@ -94,8 +94,8 @@ const schemas = {
       'string.empty': '申请人不能为空',
       'any.required': '申请人是必填项'
     }),
-    applicant_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC').required().messages({
-      'any.only': '申请人类型必须是 KITCHEN, DRIVER, STORE, QC 之一',
+    applicant_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM').required().messages({
+      'any.only': '申请人类型必须是 KITCHEN, DRIVER, STORE, QC, SYSTEM 之一',
       'any.required': '申请人类型是必填项'
     })
   }),
@@ -105,8 +105,8 @@ const schemas = {
       'string.empty': '审核人不能为空',
       'any.required': '审核人是必填项'
     }),
-    reviewer_type: Joi.string().valid('QC').required().messages({
-      'any.only': '审核人类型必须是 QC',
+    reviewer_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM').required().messages({
+      'any.only': '审核人类型必须是 KITCHEN, DRIVER, STORE, QC, SYSTEM 之一',
       'any.required': '审核人类型是必填项'
     }),
     review_result: Joi.string().valid('APPROVED', 'REJECTED').required().messages({

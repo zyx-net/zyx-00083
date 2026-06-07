@@ -566,7 +566,7 @@ curl -X PUT http://localhost:3000/api/boxes/BOX-ISO-001/status/STORE_ACCEPTED \
 
 ---
 
-## 十二、数据持久化验证
+## 十四、数据持久化验证
 
 重启服务后执行以下查询，验证数据一致性：
 
@@ -585,6 +585,20 @@ curl http://localhost:3000/api/boxes/BOX-MAIN-001
 
 # 验证导出历史
 curl http://localhost:3000/api/export-history
+
+# 验证更正申请数据
+curl http://localhost:3000/api/corrections
+
+# 验证更正配置（审核时限、可更正字段）
+curl http://localhost:3000/api/config
+
+# 验证批次更正状态
+curl http://localhost:3000/api/corrections/batch/BATCH-CORR-TEST-001/status
+
+# 验证异常清单导出包含更正状态
+curl -X POST http://localhost:3000/api/export/exceptions \
+  -H "Content-Type: application/json" \
+  -d '{"operator": "系统管理员"}'
 ```
 
 ---
