@@ -60,10 +60,13 @@ async function checkPendingConflicts(batchNo, excludeId = null) {
   for (const p of pending) {
     if (moment(p.expires_at).isAfter(now)) {
       activePending.push(p);
+    } else {
+      await checkAndMarkExpired(p);
     }
   }
+  const conflictThreshold = excludeId ? 0 : 1;
   return {
-    has_conflict: activePending.length > 0,
+    has_conflict: activePending.length > conflictThreshold,
     count: activePending.length,
     pending_corrections: activePending
   };
@@ -227,7 +230,7 @@ async function submitCorrection(correctionData) {
   }
 
   const conflictCheck = await checkPendingConflicts(box.batch_no);
-  const conflictWarning = conflictCheck.has_conflict ? 1 : 0;
+  const conflictWarning = conflictCheck.count > 0 ? 1 : 0;
 
   const now = moment().format('YYYY-MM-DD HH:mm:ss');
   const expiresAt = moment().add(config.correction_review_time_limit, 'hours').format('YYYY-MM-DD HH:mm:ss');
@@ -415,9 +418,11 @@ async function getCorrectionDetail(correctionId) {
 
   const conflictCheck = await checkPendingConflicts(correction.batch_no, correctionId);
 
+  const updated = await get('SELECT * FROM correction_applications WHERE id = ?', [correctionId]);
+
   return {
-    ...correction,
-    status_label: CORRECTION_STATUS[correction.status]?.label || correction.status,
+    ...updated,
+    status_label: CORRECTION_STATUS[updated.status]?.label || updated.status,
     has_active_conflicts: conflictCheck.has_conflict,
     other_pending_count: conflictCheck.count
   };
