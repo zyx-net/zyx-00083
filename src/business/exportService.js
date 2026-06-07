@@ -160,9 +160,24 @@ async function exportExceptionList(operator) {
     exceptions: exceptions.map(e => {
       const batchStatus = batchStatusCache[e.batch_no];
       const boxCorrections = batchStatus.all_corrections.filter(c => c.box_no === e.box_no);
-      const pendingCount = boxCorrections.filter(c => c.status === 'PENDING').length;
+      const now = moment();
+      const pendingCount = boxCorrections.filter(c => c.status === 'PENDING' && moment(c.expires_at).isAfter(now)).length;
       const approvedCount = boxCorrections.filter(c => c.status === 'APPROVED').length;
       const rejectedCount = boxCorrections.filter(c => c.status === 'REJECTED').length;
+      const expiredCount = boxCorrections.filter(c => c.status === 'EXPIRED' || 
+        (c.status === 'PENDING' && moment(c.expires_at).isSameOrBefore(now))).length;
+
+      const latestCorrection = boxCorrections.length > 0 ? boxCorrections[0] : null;
+      let latestStatusLabel = '已过期';
+      if (latestCorrection) {
+        if (latestCorrection.status === 'PENDING' && moment(latestCorrection.expires_at).isAfter(now)) {
+          latestStatusLabel = '待审核';
+        } else if (latestCorrection.status === 'APPROVED') {
+          latestStatusLabel = '已通过';
+        } else if (latestCorrection.status === 'REJECTED') {
+          latestStatusLabel = '已驳回';
+        }
+      }
 
       return {
         box_no: e.box_no,
@@ -179,15 +194,15 @@ async function exportExceptionList(operator) {
           pending_count: pendingCount,
           approved_count: approvedCount,
           rejected_count: rejectedCount,
+          expired_count: expiredCount,
           has_conflicts: batchStatus.has_conflicts,
-          latest_correction: boxCorrections.length > 0 ? {
-            correction_no: boxCorrections[0].correction_no,
-            status: boxCorrections[0].status,
-            status_label: boxCorrections[0].status === 'PENDING' ? '待审核' :
-                         boxCorrections[0].status === 'APPROVED' ? '已通过' :
-                         boxCorrections[0].status === 'REJECTED' ? '已驳回' : '已过期',
-            submitted_at: boxCorrections[0].submitted_at,
-            field_name: boxCorrections[0].field_name
+          latest_correction: latestCorrection ? {
+            correction_no: latestCorrection.correction_no,
+            status: latestCorrection.status === 'PENDING' && moment(latestCorrection.expires_at).isSameOrBefore(now) ? 'EXPIRED' : latestCorrection.status,
+            status_label: latestStatusLabel,
+            submitted_at: latestCorrection.submitted_at,
+            field_name: latestCorrection.field_name,
+            expires_at: latestCorrection.expires_at
           } : null
         }
       };
@@ -223,10 +238,14 @@ function generatePrintableException(content) {
         if (cs.approved_count > 0) statusParts.push(`已通过${cs.approved_count}条`);
         if (cs.rejected_count > 0) statusParts.push(`已驳回${cs.rejected_count}条`);
         if (cs.has_conflicts) statusParts.push('⚠️存在冲突');
+        if (cs.expired_count > 0) statusParts.push(`已过期${cs.expired_count}条`);
         
         correctionText = statusParts.length > 0 ? `\n   更正状态: ${statusParts.join(', ')}` : '';
         if (cs.latest_correction) {
           correctionText += `\n   最新更正: ${cs.latest_correction.correction_no} [${cs.latest_correction.status_label}] ${cs.latest_correction.field_name}`;
+          if (cs.latest_correction.status === 'EXPIRED') {
+            correctionText += ` (过期时间: ${cs.latest_correction.expires_at})`;
+          }
         }
       }
       return `

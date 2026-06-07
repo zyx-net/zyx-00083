@@ -566,6 +566,343 @@ curl -X PUT http://localhost:3000/api/boxes/BOX-ISO-001/status/STORE_ACCEPTED \
 
 ---
 
+## 十二、更正申请管理
+
+### 12.1 提交更正申请
+
+```bash
+curl -X POST http://localhost:3000/api/corrections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "box_no": "BOX-TEST-001",
+    "record_type": "temperature",
+    "record_id": 1,
+    "field_name": "temperature",
+    "proposed_value": "4.8",
+    "apply_reason": "温度读数误差，实际测量为4.8°C",
+    "applicant": "王司机",
+    "applicant_type": "DRIVER"
+  }'
+```
+
+**说明：**
+- `record_type`: 可选值 `status_history` | `temperature` | `box`
+- `field_name`: 必须在配置的可更正白名单内，默认可更正字段: `current_custodian`, `temperature`, `timestamp`, `operator`, `custodian_type`
+- 可提交角色: `DRIVER` | `STORE` | `QC`
+- `applicant_type`: 可选值 `KITCHEN` | `DRIVER` | `STORE` | `QC` | `SYSTEM`
+- 审核时限由配置 `correction_review_time_limit` 控制，默认24小时
+
+---
+
+### 12.2 查询更正申请列表
+
+```bash
+# 全部更正申请
+curl http://localhost:3000/api/corrections
+
+# 按箱号筛选
+curl "http://localhost:3000/api/corrections?box_no=BOX-TEST-001"
+
+# 按批次筛选
+curl "http://localhost:3000/api/corrections?batch_no=BATCH-TEST-001"
+
+# 按状态筛选
+curl "http://localhost:3000/api/corrections?status=PENDING"
+
+# 按申请人类型筛选
+curl "http://localhost:3000/api/corrections?applicant_type=DRIVER"
+```
+
+**状态说明：**
+- `PENDING`: 待审核（在审核时限内）
+- `APPROVED`: 已通过
+- `REJECTED`: 已驳回
+- `EXPIRED`: 已过期（超过审核时限未处理）
+
+---
+
+### 12.3 查询更正申请详情
+
+```bash
+# 按ID查询
+curl http://localhost:3000/api/corrections/1
+
+# 按更正编号查询
+curl http://localhost:3000/api/corrections/GZ202606070001
+```
+
+**响应字段说明：**
+- `status_label`: 状态中文显示
+- `has_active_conflicts`: 是否存在其他有效待审冲突（已过期的不计入）
+- `other_pending_count`: 同批次其他有效待审数量
+- `expires_at`: 审核截止时间，超过后自动标记为已过期
+
+---
+
+### 12.4 审核更正申请
+
+```bash
+curl -X PUT http://localhost:3000/api/corrections/1/review \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reviewer": "赵质控",
+    "reviewer_type": "QC",
+    "review_result": "APPROVED",
+    "review_reason": "经核实，温度读数确实有误，同意更正"
+  }'
+```
+
+**说明：**
+- 可审核角色: `QC`（质控）
+- `review_result`: 可选值 `APPROVED` | `REJECTED`
+- 已过期的申请不允许审核，会返回"更正申请已超过审核时限"
+- 审核通过后会自动更新原始记录的值
+
+---
+
+### 12.5 查询批次更正状态
+
+```bash
+curl http://localhost:3000/api/corrections/batch/BATCH-TEST-001/status
+```
+
+**响应字段说明：**
+- `total_corrections`: 该批次更正申请总数
+- `pending_count`: 待审核数量（有效，未过期）
+- `approved_count`: 已通过数量
+- `rejected_count`: 已驳回数量
+- `expired_count`: 已过期数量
+- `has_conflicts`: 是否存在有效待审冲突（已过期的不计入）
+- `has_pending`: 是否有待审核的有效申请
+
+---
+
+### 12.6 获取更正状态元数据
+
+```bash
+curl http://localhost:3000/api/meta/correction-statuses
+```
+
+---
+
+### 12.7 完整更正流程示例
+
+```bash
+#!/bin/bash
+
+BOX_NO="BOX-CORR-TEST-001"
+BATCH_NO="BATCH-CORR-TEST-001"
+
+# 1. 创建餐盒并流转到司机接收
+curl -X POST http://localhost:3000/api/boxes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "box_no": "'${BOX_NO}'",
+    "batch_no": "'${BATCH_NO}'",
+    "kitchen_staff": "李厨师",
+    "meal_items": [{"name": "红烧肉套餐", "quantity": 2, "price": 35}]
+  }'
+
+curl -X PUT http://localhost:3000/api/boxes/${BOX_NO}/status/MEAL_PREPARED \
+  -H "Content-Type: application/json" \
+  -d '{"operator": "李厨师", "operator_type": "KITCHEN"}'
+
+curl -X PUT http://localhost:3000/api/boxes/${BOX_NO}/status/BOXED \
+  -H "Content-Type: application/json" \
+  -d '{"operator": "李厨师", "operator_type": "KITCHEN"}'
+
+curl -X PUT http://localhost:3000/api/boxes/${BOX_NO}/status/DRIVER_RECEIVED \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "李厨师",
+    "operator_type": "KITCHEN",
+    "new_custodian": "王司机",
+    "new_custodian_type": "DRIVER",
+    "temperature": 4.5
+  }'
+
+# 2. 上报温度（模拟异常温度）
+curl -X POST http://localhost:3000/api/temperature \
+  -H "Content-Type: application/json" \
+  -d '{
+    "box_no": "'${BOX_NO}'",
+    "temperature": 15.0,
+    "timestamp": "2026-06-07 13:00:00",
+    "recorded_by": "王司机"
+  }'
+
+# 3. 查询温度记录ID
+BOX_DETAIL=$(curl -s http://localhost:3000/api/boxes/${BOX_NO})
+TEMP_RECORD_ID=$(echo ${BOX_DETAIL} | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['temperature_readings'][0]['id'])")
+STATUS_RECORD_ID=$(echo ${BOX_DETAIL} | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['status_history'][3]['id'])")
+
+echo "温度记录ID: ${TEMP_RECORD_ID}"
+echo "状态记录ID: ${STATUS_RECORD_ID}"
+
+# 4. 司机提交更正申请（修正温度）
+curl -X POST http://localhost:3000/api/corrections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "box_no": "'${BOX_NO}'",
+    "record_type": "temperature",
+    "record_id": '${TEMP_RECORD_ID}',
+    "field_name": "temperature",
+    "proposed_value": "4.8",
+    "apply_reason": "温度单位误操作，实际应为4.8°C",
+    "applicant": "王司机",
+    "applicant_type": "DRIVER"
+  }'
+
+# 5. 查询更正列表
+curl http://localhost:3000/api/corrections?box_no=${BOX_NO}
+
+# 6. 查询批次更正状态（检测冲突）
+curl http://localhost:3000/api/corrections/batch/${BATCH_NO}/status
+
+# 7. 质控审核通过
+CORRECTION_LIST=$(curl -s "http://localhost:3000/api/corrections?box_no=${BOX_NO}&status=PENDING")
+CORRECTION_ID=$(echo ${CORRECTION_LIST} | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
+
+curl -X PUT http://localhost:3000/api/corrections/${CORRECTION_ID}/review \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reviewer": "赵质控",
+    "reviewer_type": "QC",
+    "review_result": "APPROVED",
+    "review_reason": "经核实，温度记录确实存在误差，同意更正"
+  }'
+
+# 8. 验证更正后的值已生效
+curl http://localhost:3000/api/boxes/${BOX_NO}
+
+# 9. 查询审计日志
+curl "http://localhost:3000/api/audit-logs?box_no=${BOX_NO}"
+```
+
+---
+
+### 12.8 过期自动收口示例
+
+```bash
+#!/bin/bash
+
+# 1. 修改配置，将审核时限改为1小时（测试用）
+curl -X POST http://localhost:3000/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "系统管理员",
+    "version": "v1.0.1-test",
+    "temp_min": 0,
+    "temp_max": 8,
+    "delivery_time_limit": 120,
+    "correction_review_time_limit": 1,
+    "acceptance_rules": {
+      "require_temperature_check": true,
+      "require_timestamp": true,
+      "max_acceptable_temp_deviation": 2,
+      "require_custodian_verification": true,
+      "allow_partial_acceptance": false
+    }
+  }'
+
+# 2. 提交更正申请（使用旧规则版本的餐盒，新申请会用新配置的审核时限）
+# ... 提交步骤同上 ...
+
+# 3. 等待1小时后，查询详情会自动标记为已过期
+# curl http://localhost:3000/api/corrections/${CORRECTION_ID}
+
+# 4. 尝试审核已过期的申请（会被拒绝）
+# curl -X PUT http://localhost:3000/api/corrections/${CORRECTION_ID}/review ...
+# 返回: {"success":false,"error":"更正申请已超过审核时限，当前状态为已过期"}
+
+# 5. 查询批次状态，已过期的不计入待审冲突
+# curl http://localhost:3000/api/corrections/batch/${BATCH_NO}/status
+# 响应中 expired_count 会增加，pending_count 减少
+
+# 6. 导出异常清单，会显示已过期状态
+# curl -X POST http://localhost:3000/api/export/exceptions \
+#   -H "Content-Type: application/json" \
+#   -d '{"operator": "赵质控"}'
+
+# 7. 查看审计日志，会有 CORRECTION_EXPIRED 记录
+# curl "http://localhost:3000/api/audit-logs?action=CORRECTION_EXPIRED"
+
+# 8. 恢复默认配置
+curl -X POST http://localhost:3000/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "系统管理员",
+    "version": "v1.0.2-default",
+    "temp_min": 0,
+    "temp_max": 8,
+    "delivery_time_limit": 120,
+    "correction_review_time_limit": 24,
+    "acceptance_rules": {
+      "require_temperature_check": true,
+      "require_timestamp": true,
+      "max_acceptable_temp_deviation": 2,
+      "require_custodian_verification": true,
+      "allow_partial_acceptance": false
+    }
+  }'
+```
+
+---
+
+## 十三、配置修改与数据一致性
+
+### 13.1 修改审核时限配置
+
+```bash
+curl -X POST http://localhost:3000/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "系统管理员",
+    "version": "v1.0.1",
+    "temp_min": 0,
+    "temp_max": 10,
+    "delivery_time_limit": 180,
+    "correction_review_time_limit": 48,
+    "acceptance_rules": {
+      "require_temperature_check": true,
+      "require_timestamp": true,
+      "max_acceptable_temp_deviation": 2,
+      "require_custodian_verification": true,
+      "allow_partial_acceptance": false
+    }
+  }'
+```
+
+**注意：** 
+- 配置修改后，**新提交**的更正申请使用新的 `correction_review_time_limit`
+- **已提交**的申请仍按原提交时的 `expires_at` 计算（数据库中存储的提交时间+原时限）
+- 服务重启后，过期判断仍按数据库中的 `submitted_at` 和原始时限稳定生效
+
+### 13.2 服务重启后数据验证
+
+```bash
+# 重启服务后执行以下验证
+
+# 验证配置
+curl http://localhost:3000/api/config
+
+# 验证更正申请状态正确（包括已过期的）
+curl http://localhost:3000/api/corrections
+
+# 验证批次更正状态
+curl http://localhost:3000/api/corrections/batch/BATCH-TEST-001/status
+
+# 验证审计日志包含过期记录
+curl "http://localhost:3000/api/audit-logs?action=CORRECTION_EXPIRED"
+
+# 验证导出包含过期状态
+curl -X POST http://localhost:3000/api/export/exceptions \
+  -H "Content-Type: application/json" \
+  -d '{"operator": "赵质控"}'
+```
+
+---
+
 ## 十四、数据持久化验证
 
 重启服务后执行以下查询，验证数据一致性：

@@ -55,11 +55,64 @@ async function checkPendingConflicts(batchNo, excludeId = null) {
     params.push(excludeId);
   }
   const pending = await all(sql, params);
+  const activePending = [];
+  const now = moment();
+  for (const p of pending) {
+    if (moment(p.expires_at).isAfter(now)) {
+      activePending.push(p);
+    }
+  }
   return {
-    has_conflict: pending.length > 0,
-    count: pending.length,
-    pending_corrections: pending
+    has_conflict: activePending.length > 0,
+    count: activePending.length,
+    pending_corrections: activePending
   };
+}
+
+async function checkAndMarkExpired(correction) {
+  if (correction.status !== 'PENDING') return false;
+  if (moment().isBefore(moment(correction.expires_at))) return false;
+
+  const existingLog = await get(
+    'SELECT id FROM audit_logs WHERE action = ? AND details LIKE ?',
+    ['CORRECTION_EXPIRED', `%"correction_id":${correction.id}%`]
+  );
+  if (existingLog) {
+    await run('UPDATE correction_applications SET status = ? WHERE id = ?', ['EXPIRED', correction.id]);
+    return true;
+  }
+
+  await run('UPDATE correction_applications SET status = ? WHERE id = ?', ['EXPIRED', correction.id]);
+
+  await logAudit('CORRECTION_EXPIRED', correction.box_no, 'SYSTEM', {
+    correction_id: correction.id,
+    correction_no: correction.correction_no,
+    batch_no: correction.batch_no,
+    field_name: correction.field_name,
+    submitted_at: correction.submitted_at,
+    expires_at: correction.expires_at,
+    expired_at: moment().format('YYYY-MM-DD HH:mm:ss')
+  });
+
+  const conflictCheck = await checkPendingConflicts(correction.batch_no);
+  const newWarning = conflictCheck.has_conflict ? 1 : 0;
+  await run(
+    'UPDATE correction_applications SET conflict_warning = ? WHERE batch_no = ? AND status = ?',
+    [newWarning, correction.batch_no, 'PENDING']
+  );
+
+  return true;
+}
+
+async function ensureCorrectionNotExpired(correction) {
+  if (correction.status === 'PENDING') {
+    await checkAndMarkExpired(correction);
+    if (correction.status === 'PENDING') {
+      const updated = await get('SELECT * FROM correction_applications WHERE id = ?', [correction.id]);
+      if (updated) Object.assign(correction, updated);
+    }
+  }
+  return correction;
 }
 
 async function getOriginalValue(recordType, recordId, fieldName, boxNo) {
@@ -283,18 +336,19 @@ async function reviewCorrection(correctionId, reviewData) {
     throw new AppError('审核结果必须是 APPROVED 或 REJECTED');
   }
 
-  const correction = await get('SELECT * FROM correction_applications WHERE id = ?', [correctionId]);
+  let correction = await get('SELECT * FROM correction_applications WHERE id = ?', [correctionId]);
   if (!correction) {
     throw new AppError(`更正申请 ${correctionId} 不存在`, 404);
   }
 
-  if (correction.status !== 'PENDING') {
-    throw new AppError(`当前状态为 ${CORRECTION_STATUS[correction.status]?.label || correction.status}，不允许审核`);
+  await ensureCorrectionNotExpired(correction);
+
+  if (correction.status === 'EXPIRED') {
+    throw new AppError('更正申请已超过审核时限，当前状态为已过期');
   }
 
-  if (moment().isAfter(moment(correction.expires_at))) {
-    await run('UPDATE correction_applications SET status = ? WHERE id = ?', ['EXPIRED', correctionId]);
-    throw new AppError('更正申请已超过审核时限');
+  if (correction.status !== 'PENDING') {
+    throw new AppError(`当前状态为 ${CORRECTION_STATUS[correction.status]?.label || correction.status}，不允许审核`);
   }
 
   if (!ROLE_PERMISSIONS[reviewer_type].reviewable_types.includes(correction.record_type)) {
@@ -357,6 +411,8 @@ async function getCorrectionDetail(correctionId) {
   const correction = await get('SELECT * FROM correction_applications WHERE id = ?', [correctionId]);
   if (!correction) return null;
 
+  await ensureCorrectionNotExpired(correction);
+
   const conflictCheck = await checkPendingConflicts(correction.batch_no, correctionId);
 
   return {
@@ -409,7 +465,29 @@ async function getCorrectionList(params = {}) {
 }
 
 async function getBatchCorrectionStatus(batchNo) {
-  const corrections = await all(
+  let corrections = await all(
+    'SELECT * FROM correction_applications WHERE batch_no = ? ORDER BY submitted_at DESC',
+    [batchNo]
+  );
+
+  for (let i = 0; i < corrections.length; i++) {
+    await ensureCorrectionNotExpired(corrections[i]);
+  }
+
+  corrections = await all(
+    'SELECT * FROM correction_applications WHERE batch_no = ? ORDER BY submitted_at DESC',
+    [batchNo]
+  );
+
+  const now = moment();
+  const activePending = corrections.filter(c => c.status === 'PENDING' && moment(c.expires_at).isAfter(now));
+  const expiredPending = corrections.filter(c => c.status === 'PENDING' && moment(c.expires_at).isSameOrBefore(now));
+
+  for (const exp of expiredPending) {
+    await checkAndMarkExpired(exp);
+  }
+
+  corrections = await all(
     'SELECT * FROM correction_applications WHERE batch_no = ? ORDER BY submitted_at DESC',
     [batchNo]
   );
@@ -417,6 +495,9 @@ async function getBatchCorrectionStatus(batchNo) {
   const pendingCount = corrections.filter(c => c.status === 'PENDING').length;
   const approvedCount = corrections.filter(c => c.status === 'APPROVED').length;
   const rejectedCount = corrections.filter(c => c.status === 'REJECTED').length;
+  const expiredCount = corrections.filter(c => c.status === 'EXPIRED').length;
+
+  const conflictCheck = await checkPendingConflicts(batchNo);
 
   return {
     batch_no: batchNo,
@@ -424,20 +505,44 @@ async function getBatchCorrectionStatus(batchNo) {
     pending_count: pendingCount,
     approved_count: approvedCount,
     rejected_count: rejectedCount,
+    expired_count: expiredCount,
     has_pending: pendingCount > 0,
-    has_conflicts: pendingCount > 1,
+    has_conflicts: conflictCheck.has_conflict,
     latest_correction: corrections.length > 0 ? corrections[0] : null,
     all_corrections: corrections
   };
 }
 
 async function expireOverdueCorrections() {
-  const now = moment().format('YYYY-MM-DD HH:mm:ss');
-  const result = await run(
-    'UPDATE correction_applications SET status = ? WHERE status = ? AND expires_at < ?',
-    ['EXPIRED', 'PENDING', now]
+  const now = moment();
+  const nowStr = now.format('YYYY-MM-DD HH:mm:ss');
+
+  const toExpire = await all(
+    'SELECT * FROM correction_applications WHERE status = ? AND expires_at < ?',
+    ['PENDING', nowStr]
   );
-  return result.changes;
+
+  const affectedBatches = new Set();
+  let expiredCount = 0;
+
+  for (const correction of toExpire) {
+    const wasExpired = await checkAndMarkExpired(correction);
+    if (wasExpired) {
+      expiredCount++;
+      affectedBatches.add(correction.batch_no);
+    }
+  }
+
+  for (const batchNo of affectedBatches) {
+    const conflictCheck = await checkPendingConflicts(batchNo);
+    const newWarning = conflictCheck.has_conflict ? 1 : 0;
+    await run(
+      'UPDATE correction_applications SET conflict_warning = ? WHERE batch_no = ? AND status = ?',
+      [newWarning, batchNo, 'PENDING']
+    );
+  }
+
+  return expiredCount;
 }
 
 module.exports = {
