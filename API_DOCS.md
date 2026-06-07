@@ -314,6 +314,191 @@ curl http://localhost:3000/api/export/HJD202606071234
 curl http://localhost:3000/api/export-history
 ```
 
+### 8.5 更正快照说明
+
+**所有导出的单据（交接单和异常清单）都会自动保存当时的更正申请快照，确保历史可追溯。**
+
+**快照包含内容：**
+- `snapshot_time`: 快照生成时间（即导出时间）
+- `snapshot_version`: 快照数据结构版本
+- `overall`: 整体统计（总数、待审核、已通过、已驳回、已过期、冲突数量）
+- `batch_summaries`: 按批次分组的详细信息
+  - 各状态更正数量统计
+  - 冲突数量
+  - 最近一次审核人、审核结果、审核原因、审核时间
+  - 所有关联更正申请的完整快照（状态、是否过期、审核信息等）
+
+**快照特性：**
+1. **不可变性**: 快照一旦生成，永远不会被后续的更正申请修改或覆盖
+2. **持久化**: 存储在数据库 `exported_documents` 表的 `correction_snapshot` 字段，服务重启后数据保持一致
+3. **可追溯**: 通过导出详情和导出历史接口都可以获取完整的快照数据
+4. **可视化**: 打印格式中包含快照摘要信息
+
+**查询导出单据时返回的快照结构：**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "doc_type": "HANDOVER_ORDER",
+    "doc_no": "HJD202606071234",
+    "content": { "...": "单据完整内容，内嵌 correction_snapshot" },
+    "correction_snapshot": {
+      "snapshot_time": "2026-06-07 14:30:00",
+      "snapshot_version": 1,
+      "overall": {
+        "total_batches": 1,
+        "total_corrections": 3,
+        "pending_count": 1,
+        "approved_count": 1,
+        "rejected_count": 0,
+        "expired_count": 1,
+        "conflict_count": 1
+      },
+      "batch_summaries": {
+        "BATCH-001": {
+          "batch_no": "BATCH-001",
+          "total_corrections": 3,
+          "pending_count": 1,
+          "approved_count": 1,
+          "rejected_count": 0,
+          "expired_count": 1,
+          "conflict_count": 1,
+          "has_conflicts": true,
+          "latest_reviewer": "赵质控",
+          "latest_reviewer_type": "QC",
+          "latest_review_reason": "经核实数据有误",
+          "latest_review_result": "APPROVED",
+          "latest_reviewed_at": "2026-06-07 10:00:00",
+          "corrections": [
+            {
+              "correction_no": "GZ202606070001",
+              "box_no": "BOX-001",
+              "field_name": "temperature",
+              "status": "APPROVED",
+              "status_label": "已通过",
+              "is_expired": false,
+              "reviewer": "赵质控",
+              "review_reason": "经核实数据有误",
+              "has_conflict": true
+            }
+          ]
+        }
+      }
+    },
+    "is_reexport": false,
+    "parent_doc_no": null,
+    "version": 1
+  }
+}
+```
+
+### 8.6 带原因的重新导出
+
+**功能说明：** 当更正申请发生变化后，QC 人员可以针对已导出的历史单据进行重新导出，生成包含最新更正快照的新单据。
+
+**特性：**
+- 由配置开关 `allow_reexport` 控制，默认开启
+- 仅 QC 角色有权限执行
+- 必须提供重新导出原因
+- 生成新的单据号，保留原始单据号作为 `parent_doc_no`
+- 版本号自动递增
+- 完整记录审计日志，包含新旧单据号、原因、更正摘要
+
+```bash
+curl -X POST http://localhost:3000/api/export/HJD202606071234/reexport \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "赵质控",
+    "operator_type": "QC",
+    "reexport_reason": "更正申请已审核通过，需更新单据中的更正状态"
+  }'
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "old_doc_no": "HJD202606071234",
+    "new_doc_no": "HJD202606075678",
+    "version": 2,
+    "doc_type": "HANDOVER_ORDER",
+    "correction_summary": "更正总数: 3 → 5; 待审核: 1 → 0; 已通过: 1 → 3",
+    "document": {
+      "doc_no": "HJD202606075678",
+      "correction_snapshot": { "...": "最新更正快照" },
+      "printable_format": "..."
+    }
+  },
+  "message": "重新导出成功，新单据号: HJD202606075678"
+}
+```
+
+**权限校验错误响应：**
+```json
+{
+  "success": false,
+  "error": "角色 DRIVER 没有重新导出的权限，仅 QC 可执行重新导出"
+}
+```
+
+**配置关闭时的响应：**
+```json
+{
+  "success": false,
+  "error": "系统已关闭重新导出功能，请联系管理员开启"
+}
+```
+
+### 8.7 配置重新导出开关
+
+通过更新配置可以开启或关闭重新导出功能：
+
+```bash
+curl -X POST http://localhost:3000/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "系统管理员",
+    "version": "v1.0.2",
+    "temp_min": 0,
+    "temp_max": 8,
+    "delivery_time_limit": 120,
+    "correction_review_time_limit": 24,
+    "allow_reexport": false,
+    "acceptance_rules": {
+      "require_temperature_check": true,
+      "require_timestamp": true,
+      "max_acceptable_temp_deviation": 2,
+      "require_custodian_verification": true,
+      "allow_partial_acceptance": false
+    }
+  }'
+```
+
+**配置字段说明：**
+- `allow_reexport`: 是否允许重新导出，`true` 开启，`false` 关闭，默认 `true`
+
+### 8.8 审计日志
+
+重新导出操作会记录完整的审计日志，可通过审计日志接口查询：
+
+```bash
+curl "http://localhost:3000/api/audit-logs?action=DOCUMENT_REEXPORT"
+```
+
+**日志详情包含：**
+- `old_doc_no`: 原始单据号
+- `new_doc_no`: 新单据号
+- `doc_type`: 单据类型
+- `old_version`: 原始版本号
+- `new_version`: 新版本号
+- `reexport_reason`: 重新导出原因
+- `operator_type`: 操作人类型
+- `correction_summary`: 更正状态变化摘要
+- `snapshot_time_old`: 旧快照时间
+- `snapshot_time_new`: 新快照时间
+
 ---
 
 ## 九、元数据

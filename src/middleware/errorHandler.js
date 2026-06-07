@@ -117,6 +117,21 @@ const schemas = {
       'string.empty': '审核意见不能为空',
       'any.required': '审核意见是必填项'
     })
+  }),
+
+  reexportRequest: Joi.object({
+    operator: Joi.string().required().messages({
+      'string.empty': '操作人不能为空',
+      'any.required': '操作人是必填项'
+    }),
+    operator_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM').required().messages({
+      'any.only': '操作人类型必须是 KITCHEN, DRIVER, STORE, QC, SYSTEM 之一',
+      'any.required': '操作人类型是必填项'
+    }),
+    reexport_reason: Joi.string().required().messages({
+      'string.empty': '重新导出原因不能为空',
+      'any.required': '重新导出原因是必填项'
+    })
   })
 };
 
@@ -200,6 +215,7 @@ function notFoundHandler(req, res) {
       'POST   /api/export/exceptions',
       'GET    /api/export/:doc_no',
       'GET    /api/export-history',
+      'POST   /api/export/:doc_no/reexport',
       'POST   /api/corrections',
       'GET    /api/corrections',
       'GET    /api/corrections/:id',

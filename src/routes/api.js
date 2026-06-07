@@ -21,7 +21,8 @@ const {
   exportHandoverDocument,
   exportExceptionList,
   getExportedDocument,
-  getExportHistory
+  getExportHistory,
+  reexportDocument
 } = require('../business/exportService');
 const {
   submitCorrection,
@@ -184,6 +185,20 @@ router.get('/export-history', asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: history
+  });
+}));
+
+router.post('/export/:doc_no/reexport', validate('reexportRequest'), asyncHandler(async (req, res) => {
+  const result = await reexportDocument(
+    req.params.doc_no,
+    req.validatedBody.operator,
+    req.validatedBody.operator_type,
+    req.validatedBody.reexport_reason
+  );
+  res.json({
+    success: true,
+    data: result,
+    message: `重新导出成功，新单据号: ${result.new_doc_no}`
   });
 }));
 

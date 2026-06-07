@@ -14,15 +14,16 @@ const DEFAULT_CONFIG = {
     allow_partial_acceptance: false
   }),
   correction_review_time_limit: 24,
-  correctable_fields_whitelist: JSON.stringify(['current_custodian', 'temperature', 'timestamp', 'operator', 'custodian_type'])
+  correctable_fields_whitelist: JSON.stringify(['current_custodian', 'temperature', 'timestamp', 'operator', 'custodian_type']),
+  allow_reexport: 1
 };
 
 async function initConfig() {
   const existing = await get('SELECT * FROM configurations WHERE is_active = 1');
   if (!existing) {
     await run(
-      `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, created_at, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, allow_reexport, created_at, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         DEFAULT_CONFIG.version,
         DEFAULT_CONFIG.temp_min,
@@ -31,6 +32,7 @@ async function initConfig() {
         DEFAULT_CONFIG.acceptance_rules,
         DEFAULT_CONFIG.correction_review_time_limit,
         DEFAULT_CONFIG.correctable_fields_whitelist,
+        DEFAULT_CONFIG.allow_reexport,
         moment().format('YYYY-MM-DD HH:mm:ss')
       ]
     );
@@ -49,7 +51,8 @@ async function getActiveConfig() {
   return {
     ...config,
     acceptance_rules: JSON.parse(config.acceptance_rules),
-    correctable_fields_whitelist: config.correctable_fields_whitelist ? JSON.parse(config.correctable_fields_whitelist) : []
+    correctable_fields_whitelist: config.correctable_fields_whitelist ? JSON.parse(config.correctable_fields_whitelist) : [],
+    allow_reexport: config.allow_reexport !== undefined ? config.allow_reexport === 1 : true
   };
 }
 
@@ -58,6 +61,7 @@ async function getConfigByVersion(version) {
   if (config) {
     config.acceptance_rules = JSON.parse(config.acceptance_rules);
     config.correctable_fields_whitelist = config.correctable_fields_whitelist ? JSON.parse(config.correctable_fields_whitelist) : [];
+    config.allow_reexport = config.allow_reexport !== undefined ? config.allow_reexport === 1 : true;
   }
   return config;
 }
@@ -67,7 +71,8 @@ async function getAllConfigs() {
   return configs.map(c => ({
     ...c,
     acceptance_rules: JSON.parse(c.acceptance_rules),
-    correctable_fields_whitelist: c.correctable_fields_whitelist ? JSON.parse(c.correctable_fields_whitelist) : []
+    correctable_fields_whitelist: c.correctable_fields_whitelist ? JSON.parse(c.correctable_fields_whitelist) : [],
+    allow_reexport: c.allow_reexport !== undefined ? c.allow_reexport === 1 : true
   }));
 }
 
@@ -75,8 +80,8 @@ async function addNewConfig(newConfig, operator) {
   await run('UPDATE configurations SET is_active = 0 WHERE is_active = 1');
   
   const result = await run(
-    `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, created_at, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, allow_reexport, created_at, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
     [
       newConfig.version,
       newConfig.temp_min,
@@ -85,6 +90,7 @@ async function addNewConfig(newConfig, operator) {
       JSON.stringify(newConfig.acceptance_rules),
       newConfig.correction_review_time_limit || 24,
       JSON.stringify(newConfig.correctable_fields_whitelist || ['current_custodian', 'temperature', 'timestamp', 'operator', 'custodian_type']),
+      newConfig.allow_reexport !== undefined ? (newConfig.allow_reexport ? 1 : 0) : 1,
       moment().format('YYYY-MM-DD HH:mm:ss')
     ]
   );

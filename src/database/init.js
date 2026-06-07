@@ -13,8 +13,55 @@ function initDatabase() {
         reject(err);
       } else {
         console.log('SQLite 数据库连接成功');
-        initTables().then(resolve).catch(reject);
+        initTables()
+          .then(() => migrateTables())
+          .then(resolve)
+          .catch(reject);
       }
+    });
+  });
+}
+
+function migrateTables() {
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      const migrations = [
+        { table: 'configurations', column: 'allow_reexport', definition: 'INTEGER DEFAULT 1' },
+        { table: 'exported_documents', column: 'correction_snapshot', definition: 'TEXT' },
+        { table: 'exported_documents', column: 'parent_doc_no', definition: 'TEXT' },
+        { table: 'exported_documents', column: 'is_reexport', definition: 'INTEGER DEFAULT 0' },
+        { table: 'exported_documents', column: 'reexport_reason', definition: 'TEXT' },
+        { table: 'exported_documents', column: 'version', definition: 'INTEGER DEFAULT 1' }
+      ];
+
+      let completed = 0;
+      const total = migrations.length;
+
+      migrations.forEach(migration => {
+        db.all(`PRAGMA table_info(${migration.table})`, (err, rows) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          const columnExists = rows.some(row => row.name === migration.column);
+          if (!columnExists) {
+            db.run(`ALTER TABLE ${migration.table} ADD COLUMN ${migration.column} ${migration.definition}`, (alterErr) => {
+              if (alterErr) {
+                console.log(`迁移字段 ${migration.table}.${migration.column} 可能已存在，跳过`);
+              } else {
+                console.log(`已迁移字段: ${migration.table}.${migration.column}`);
+              }
+              completed++;
+              if (completed === total) resolve();
+            });
+          } else {
+            completed++;
+            if (completed === total) resolve();
+          }
+        });
+      });
+
+      if (total === 0) resolve();
     });
   });
 }
@@ -31,6 +78,7 @@ function initTables() {
         acceptance_rules TEXT NOT NULL,
         correction_review_time_limit INTEGER DEFAULT 24,
         correctable_fields_whitelist TEXT DEFAULT '["current_custodian","temperature","timestamp","operator","custodian_type"]',
+        allow_reexport INTEGER DEFAULT 1,
         created_at TEXT NOT NULL,
         is_active INTEGER DEFAULT 0
       )`);
@@ -91,7 +139,12 @@ function initTables() {
         box_no TEXT,
         content TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        created_by TEXT NOT NULL
+        created_by TEXT NOT NULL,
+        correction_snapshot TEXT,
+        parent_doc_no TEXT,
+        is_reexport INTEGER DEFAULT 0,
+        reexport_reason TEXT,
+        version INTEGER DEFAULT 1
       )`);
 
       db.run(`CREATE TABLE IF NOT EXISTS correction_applications (

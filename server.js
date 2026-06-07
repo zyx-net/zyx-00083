@@ -9,7 +9,7 @@ if (!fs.existsSync(dataDir)) {
 
 const apiRoutes = require('./src/routes/api');
 const { errorHandler, notFoundHandler } = require('./src/middleware/errorHandler');
-const { initConfig } = require('./src/config/configManager');
+const { initConfig, getActiveConfig } = require('./src/config/configManager');
 const { initSampleData } = require('./src/data/sampleData');
 const { initDatabase } = require('./src/database/init');
 const { expireOverdueCorrections } = require('./src/business/correctionService');
@@ -63,6 +63,8 @@ async function startServer() {
       console.log(`已自动标记 ${expiredCount} 条超时未审核的更正申请为已过期`);
     }
     
+    const activeConfig = await getActiveConfig();
+    
     app.listen(PORT, () => {
       console.log('=========================================');
       console.log('   冷链餐盒交付追踪 API 服务已启动');
@@ -82,6 +84,14 @@ async function startServer() {
       console.log('  - 可更正字段: current_custodian, temperature, timestamp, operator, custodian_type');
       console.log('  - 默认审核时限: 24小时');
       console.log('  - 审核角色: QC (质控)');
+      console.log('=========================================');
+      console.log('导出更正追溯能力:');
+      console.log('  - 交接单/异常清单导出自动保存更正快照');
+      console.log('  - 快照包含: 状态、过期标记、冲突数量、审核人、审核原因');
+      console.log('  - 历史单据快照永久保存，不会被后续更正改写');
+      console.log('  - 服务重启后快照保持一致');
+      console.log('  - 重新导出功能: ' + (activeConfig.allow_reexport ? '已开启 (默认)' : '已关闭'));
+      console.log('  - 重新导出权限: 仅 QC 可操作');
       console.log('=========================================');
     });
   } catch (err) {
