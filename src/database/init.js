@@ -29,6 +29,8 @@ function initTables() {
         temp_max REAL NOT NULL,
         delivery_time_limit INTEGER NOT NULL,
         acceptance_rules TEXT NOT NULL,
+        correction_review_time_limit INTEGER DEFAULT 24,
+        correctable_fields_whitelist TEXT DEFAULT '["current_custodian","temperature","timestamp","operator","custodian_type"]',
         created_at TEXT NOT NULL,
         is_active INTEGER DEFAULT 0
       )`);
@@ -90,6 +92,31 @@ function initTables() {
         content TEXT NOT NULL,
         created_at TEXT NOT NULL,
         created_by TEXT NOT NULL
+      )`);
+
+      db.run(`CREATE TABLE IF NOT EXISTS correction_applications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        correction_no TEXT NOT NULL UNIQUE,
+        batch_no TEXT NOT NULL,
+        box_no TEXT NOT NULL,
+        record_type TEXT NOT NULL,
+        record_id INTEGER,
+        field_name TEXT NOT NULL,
+        original_value TEXT NOT NULL,
+        proposed_value TEXT NOT NULL,
+        apply_reason TEXT NOT NULL,
+        applicant TEXT NOT NULL,
+        applicant_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        reviewer TEXT,
+        reviewer_type TEXT,
+        review_result TEXT,
+        review_reason TEXT,
+        submitted_at TEXT NOT NULL,
+        reviewed_at TEXT,
+        expires_at TEXT NOT NULL,
+        conflict_warning INTEGER DEFAULT 0,
+        FOREIGN KEY (box_no) REFERENCES boxes(box_no)
       )`, (err) => {
         if (err) reject(err);
         else {

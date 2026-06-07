@@ -65,6 +65,58 @@ const schemas = {
       'string.empty': '操作人不能为空',
       'any.required': '操作人是必填项'
     })
+  }),
+
+  correctionSubmit: Joi.object({
+    box_no: Joi.string().required().messages({
+      'string.empty': '箱号不能为空',
+      'any.required': '箱号是必填项'
+    }),
+    record_type: Joi.string().valid('status_history', 'temperature', 'box').required().messages({
+      'any.only': '记录类型必须是 status_history, temperature, box 之一',
+      'any.required': '记录类型是必填项'
+    }),
+    record_id: Joi.number().integer().min(1).optional().messages({
+      'number.base': '记录ID必须为正整数'
+    }),
+    field_name: Joi.string().required().messages({
+      'string.empty': '更正字段名不能为空',
+      'any.required': '更正字段名是必填项'
+    }),
+    proposed_value: Joi.alternatives().try(Joi.string(), Joi.number()).required().messages({
+      'any.required': '更正后的值是必填项'
+    }),
+    apply_reason: Joi.string().required().messages({
+      'string.empty': '更正原因不能为空',
+      'any.required': '更正原因是必填项'
+    }),
+    applicant: Joi.string().required().messages({
+      'string.empty': '申请人不能为空',
+      'any.required': '申请人是必填项'
+    }),
+    applicant_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC').required().messages({
+      'any.only': '申请人类型必须是 KITCHEN, DRIVER, STORE, QC 之一',
+      'any.required': '申请人类型是必填项'
+    })
+  }),
+
+  correctionReview: Joi.object({
+    reviewer: Joi.string().required().messages({
+      'string.empty': '审核人不能为空',
+      'any.required': '审核人是必填项'
+    }),
+    reviewer_type: Joi.string().valid('QC').required().messages({
+      'any.only': '审核人类型必须是 QC',
+      'any.required': '审核人类型是必填项'
+    }),
+    review_result: Joi.string().valid('APPROVED', 'REJECTED').required().messages({
+      'any.only': '审核结果必须是 APPROVED 或 REJECTED',
+      'any.required': '审核结果是必填项'
+    }),
+    review_reason: Joi.string().required().messages({
+      'string.empty': '审核意见不能为空',
+      'any.required': '审核意见是必填项'
+    })
   })
 };
 
@@ -147,7 +199,13 @@ function notFoundHandler(req, res) {
       'POST   /api/export/handover/:box_no',
       'POST   /api/export/exceptions',
       'GET    /api/export/:doc_no',
-      'GET    /api/export-history'
+      'GET    /api/export-history',
+      'POST   /api/corrections',
+      'GET    /api/corrections',
+      'GET    /api/corrections/:id',
+      'PUT    /api/corrections/:id/review',
+      'GET    /api/corrections/batch/:batch_no/status',
+      'GET    /api/meta/correction-statuses'
     ]
   });
 }

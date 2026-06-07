@@ -23,6 +23,15 @@ const {
   getExportedDocument,
   getExportHistory
 } = require('../business/exportService');
+const {
+  submitCorrection,
+  reviewCorrection,
+  getCorrectionDetail,
+  getCorrectionByNo,
+  getCorrectionList,
+  getBatchCorrectionStatus,
+  CORRECTION_STATUS
+} = require('../business/correctionService');
 
 router.get('/health', asyncHandler(async (req, res) => {
   res.json({
@@ -195,5 +204,70 @@ router.get('/meta/custodian-types', (req, res) => {
     data: Object.entries(CUSTODIAN_TYPES).map(([code, label]) => ({ code, label }))
   });
 });
+
+router.get('/meta/correction-statuses', (req, res) => {
+  res.json({
+    success: true,
+    data: Object.entries(CORRECTION_STATUS).map(([code, info]) => ({
+      code,
+      label: info.label,
+      can_review: info.can_review
+    }))
+  });
+});
+
+router.post('/corrections', validate('correctionSubmit'), asyncHandler(async (req, res) => {
+  const correction = await submitCorrection(req.validatedBody);
+  res.status(201).json({
+    success: true,
+    data: correction,
+    message: correction.conflict_warning ? '更正申请已提交，存在冲突风险' : '更正申请已提交'
+  });
+}));
+
+router.get('/corrections', asyncHandler(async (req, res) => {
+  const corrections = await getCorrectionList(req.query);
+  res.json({
+    success: true,
+    data: corrections
+  });
+}));
+
+router.get('/corrections/:id', asyncHandler(async (req, res) => {
+  let correction;
+  if (req.params.id.startsWith('GZ')) {
+    correction = await getCorrectionByNo(req.params.id);
+  } else {
+    correction = await getCorrectionDetail(parseInt(req.params.id));
+  }
+  if (!correction) {
+    return res.status(404).json({
+      success: false,
+      error: `更正申请 ${req.params.id} 不存在`
+    });
+  }
+  res.json({
+    success: true,
+    data: correction
+  });
+}));
+
+router.put('/corrections/:id/review', validate('correctionReview'), asyncHandler(async (req, res) => {
+  const correctionId = parseInt(req.params.id);
+  const correction = await reviewCorrection(correctionId, req.validatedBody);
+  res.json({
+    success: true,
+    data: correction,
+    message: correction.has_active_conflicts ? '审核完成，该批次仍有其他待审更正' : `更正申请已${correction.status_label}`
+  });
+}));
+
+router.get('/corrections/batch/:batch_no/status', asyncHandler(async (req, res) => {
+  const status = await getBatchCorrectionStatus(req.params.batch_no);
+  res.json({
+    success: true,
+    data: status
+  });
+}));
 
 module.exports = router;

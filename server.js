@@ -12,6 +12,7 @@ const { errorHandler, notFoundHandler } = require('./src/middleware/errorHandler
 const { initConfig } = require('./src/config/configManager');
 const { initSampleData } = require('./src/data/sampleData');
 const { initDatabase } = require('./src/database/init');
+const { expireOverdueCorrections } = require('./src/business/correctionService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -57,6 +58,11 @@ async function startServer() {
     await initConfig();
     await initSampleData();
     
+    const expiredCount = await expireOverdueCorrections();
+    if (expiredCount > 0) {
+      console.log(`已自动标记 ${expiredCount} 条超时未审核的更正申请为已过期`);
+    }
+    
     app.listen(PORT, () => {
       console.log('=========================================');
       console.log('   冷链餐盒交付追踪 API 服务已启动');
@@ -71,6 +77,11 @@ async function startServer() {
       console.log('  BOX-SAMPLE-003 (异常隔离)');
       console.log('  BOX-SAMPLE-004 (已装箱)');
       console.log('  BOX-SAMPLE-005 (已归档)');
+      console.log('=========================================');
+      console.log('更正功能已启用:');
+      console.log('  - 可更正字段: current_custodian, temperature, timestamp, operator, custodian_type');
+      console.log('  - 默认审核时限: 24小时');
+      console.log('  - 审核角色: QC (质控)');
       console.log('=========================================');
     });
   } catch (err) {

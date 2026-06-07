@@ -1,6 +1,7 @@
 const { get, run, all } = require('../database/init');
 const { getBoxDetail, getExceptionList, STATUS_FLOW } = require('./trackingService');
 const { getConfigByVersion } = require('../config/configManager');
+const { getBatchCorrectionStatus } = require('./correctionService');
 const moment = require('moment');
 
 function generateDocNo(prefix) {
@@ -143,23 +144,54 @@ async function exportExceptionList(operator) {
   const docNo = generateDocNo('YCD');
   const now = moment().format('YYYY-MM-DD HH:mm:ss');
 
+  const batchStatusCache = {};
+  for (const e of exceptions) {
+    if (!batchStatusCache[e.batch_no]) {
+      batchStatusCache[e.batch_no] = await getBatchCorrectionStatus(e.batch_no);
+    }
+  }
+
   const exceptionContent = {
     doc_no: docNo,
     doc_type: 'EXCEPTION_LIST',
     created_at: now,
     created_by: operator,
     total_count: exceptions.length,
-    exceptions: exceptions.map(e => ({
-      box_no: e.box_no,
-      batch_no: e.batch_no,
-      status: e.status,
-      status_label: e.status_label,
-      current_custodian: e.current_custodian,
-      exception_reason: e.exception_reason,
-      meal_items: e.meal_items,
-      isolated_at: e.isolated_at,
-      archived_at: e.archived_at
-    }))
+    exceptions: exceptions.map(e => {
+      const batchStatus = batchStatusCache[e.batch_no];
+      const boxCorrections = batchStatus.all_corrections.filter(c => c.box_no === e.box_no);
+      const pendingCount = boxCorrections.filter(c => c.status === 'PENDING').length;
+      const approvedCount = boxCorrections.filter(c => c.status === 'APPROVED').length;
+      const rejectedCount = boxCorrections.filter(c => c.status === 'REJECTED').length;
+
+      return {
+        box_no: e.box_no,
+        batch_no: e.batch_no,
+        status: e.status,
+        status_label: e.status_label,
+        current_custodian: e.current_custodian,
+        exception_reason: e.exception_reason,
+        meal_items: e.meal_items,
+        isolated_at: e.isolated_at,
+        archived_at: e.archived_at,
+        correction_status: {
+          has_pending: pendingCount > 0,
+          pending_count: pendingCount,
+          approved_count: approvedCount,
+          rejected_count: rejectedCount,
+          has_conflicts: batchStatus.has_conflicts,
+          latest_correction: boxCorrections.length > 0 ? {
+            correction_no: boxCorrections[0].correction_no,
+            status: boxCorrections[0].status,
+            status_label: boxCorrections[0].status === 'PENDING' ? '待审核' :
+                         boxCorrections[0].status === 'APPROVED' ? '已通过' :
+                         boxCorrections[0].status === 'REJECTED' ? '已驳回' : '已过期',
+            submitted_at: boxCorrections[0].submitted_at,
+            field_name: boxCorrections[0].field_name
+          } : null
+        }
+      };
+    })
   };
 
   await run(
@@ -182,15 +214,31 @@ async function exportExceptionList(operator) {
 
 function generatePrintableException(content) {
   const listText = content.exceptions
-    .map((e, idx) => `
+    .map((e, idx) => {
+      const cs = e.correction_status;
+      let correctionText = '';
+      if (cs) {
+        const statusParts = [];
+        if (cs.pending_count > 0) statusParts.push(`待审${cs.pending_count}条`);
+        if (cs.approved_count > 0) statusParts.push(`已通过${cs.approved_count}条`);
+        if (cs.rejected_count > 0) statusParts.push(`已驳回${cs.rejected_count}条`);
+        if (cs.has_conflicts) statusParts.push('⚠️存在冲突');
+        
+        correctionText = statusParts.length > 0 ? `\n   更正状态: ${statusParts.join(', ')}` : '';
+        if (cs.latest_correction) {
+          correctionText += `\n   最新更正: ${cs.latest_correction.correction_no} [${cs.latest_correction.status_label}] ${cs.latest_correction.field_name}`;
+        }
+      }
+      return `
 ${idx + 1}. 箱号: ${e.box_no}
    批次: ${e.batch_no}
    状态: ${e.status_label}
    当前保管人: ${e.current_custodian}
    异常原因: ${e.exception_reason || '未记录'}
    隔离时间: ${e.isolated_at || '未记录'}
-   餐品: ${e.meal_items.map(m => `${m.name}x${m.quantity}`).join(', ')}
-`)
+   餐品: ${e.meal_items.map(m => `${m.name}x${m.quantity}`).join(', ')}${correctionText}
+`;
+    })
     .join('\n');
 
   return `
