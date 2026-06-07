@@ -1327,6 +1327,328 @@ for log in d['data']:
 
 ---
 
+## 十六、批次复盘报告
+
+### 16.1 功能概述
+
+批次复盘报告功能用于汇总指定批次所有餐盒的完整信息，包括当前状态、关键交接时间、温度异常、隔离原因、更正申请状态、已导出单据编号，以及冲突提示。
+
+**核心特性：**
+
+1. **快照不可变性**：报告生成时会保存完整的数据快照，后续的更正或重新导出不会修改历史报告
+2. **版本追踪**：每次报告会记录当时使用的配置版本，便于追溯
+3. **持久化存储**：所有报告存储在数据库中，服务重启后历史报告保持完整
+4. **冲突检测**：自动检测待审更正、导出版本不一致等冲突，不阻塞报告生成
+5. **权限控制**：非 QC/管理员角色仅可查看基础字段，越权访问返回清晰错误
+6. **审计日志**：报告生成和越权访问都会记录审计日志
+7. **可配置性**：支持功能开关和可见字段白名单配置
+
+### 16.2 生成批次复盘报告
+
+```bash
+curl -X POST http://localhost:3000/api/reports/batch/BATCH-2026-0601-001 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "赵质控",
+    "operator_type": "QC"
+  }'
+```
+
+**请求参数说明：**
+- `batch_no`: 批次号（URL 参数）
+- `operator`: 操作人姓名
+- `operator_type`: 操作人角色，可选值 `KITCHEN`, `DRIVER`, `STORE`, `QC`, `ADMIN`, `SYSTEM`
+
+**响应示例（QC 角色，完整字段）：**
+```json
+{
+  "success": true,
+  "data": {
+    "report_no": "BGR202606071234",
+    "batch_no": "BATCH-2026-0601-001",
+    "total_boxes": 2,
+    "status_summary": {
+      "STORE_ACCEPTED": 1,
+      "STORE_ACCEPTED_label": "门店已验收",
+      "DRIVER_RECEIVED": 1,
+      "DRIVER_RECEIVED_label": "司机已接收"
+    },
+    "handover_timestamps": {
+      "CREATED": {
+        "earliest": "2026-06-07 10:00:00",
+        "latest": "2026-06-07 10:05:00",
+        "count": 2
+      },
+      "MEAL_PREPARED": { "...": "..." },
+      "DRIVER_RECEIVED": { "...": "..." }
+    },
+    "temperature_abnormalities": [
+      {
+        "box_no": "BOX-SAMPLE-001",
+        "temperature": 12.3,
+        "timestamp": "2026-06-07 11:30:00",
+        "recorded_by": "王司机"
+      }
+    ],
+    "isolation_reasons": [],
+    "corrections_summary": {
+      "total": 3,
+      "pending": 1,
+      "approved": 1,
+      "rejected": 0,
+      "expired": 1,
+      "has_pending": true,
+      "has_conflicts": true
+    },
+    "exported_documents": [
+      {
+        "doc_no": "HJD202606071234",
+        "doc_type": "HANDOVER_ORDER",
+        "doc_type_label": "交接单",
+        "box_no": "BOX-SAMPLE-001",
+        "created_at": "2026-06-07 14:00:00",
+        "created_by": "王店长",
+        "version": 1,
+        "is_reexport": false,
+        "parent_doc_no": null
+      }
+    ],
+    "conflict_warnings": [
+      {
+        "type": "PENDING_CORRECTIONS",
+        "severity": "WARNING",
+        "message": "该批次存在 1 条待审核的更正申请"
+      }
+    ],
+    "config_version": "v1.0.0",
+    "generated_at": "2026-06-07 15:00:00",
+    "generated_by": "赵质控",
+    "has_conflicts": true,
+    "conflict_details": [
+      {
+        "type": "PENDING_CORRECTIONS",
+        "severity": "WARNING",
+        "message": "该批次存在 1 条待审核的更正申请",
+        "details": {
+          "pending_count": 1,
+          "pending_corrections": [
+            {
+              "correction_no": "GZ202606070001",
+              "box_no": "BOX-SAMPLE-001",
+              "field_name": "temperature",
+              "applicant": "王司机",
+              "submitted_at": "2026-06-07 13:00:00",
+              "expires_at": "2026-06-08 13:00:00"
+            }
+          ]
+        }
+      }
+    ],
+    "_meta": {
+      "is_authorized": true,
+      "visible_fields": ["batch_no", "total_boxes", "..."]
+    }
+  },
+  "message": "报告生成成功，存在冲突提示，请查看 conflict_warnings"
+}
+```
+
+**响应示例（非 QC 角色，仅基础字段）：**
+```json
+{
+  "success": true,
+  "data": {
+    "batch_no": "BATCH-2026-0601-001",
+    "total_boxes": 2,
+    "status_summary": {
+      "STORE_ACCEPTED": 1,
+      "STORE_ACCEPTED_label": "门店已验收",
+      "DRIVER_RECEIVED": 1,
+      "DRIVER_RECEIVED_label": "司机已接收"
+    },
+    "config_version": "v1.0.0",
+    "generated_at": "2026-06-07 15:00:00",
+    "generated_by": "赵质控",
+    "report_no": "BGR202606071234",
+    "has_conflicts": true,
+    "_meta": {
+      "is_authorized": false,
+      "visible_fields": ["batch_no", "total_boxes", "status_summary", "config_version", "generated_at", "generated_by"]
+    }
+  },
+  "message": "报告生成成功，存在冲突提示，请查看 conflict_warnings"
+}
+```
+
+### 16.3 查询报告列表
+
+```bash
+# 全部报告（默认 STORE 角色，仅基础字段）
+curl http://localhost:3000/api/reports
+
+# 指定 QC 角色（完整字段）
+curl "http://localhost:3000/api/reports?operator_type=QC"
+
+# 按批次筛选
+curl "http://localhost:3000/api/reports?batch_no=BATCH-2026-0601-001&operator_type=QC"
+
+# 按配置版本筛选
+curl "http://localhost:3000/api/reports?config_version=v1.0.0&operator_type=QC"
+```
+
+### 16.4 查询报告详情（完整内容，需 QC/管理员权限）
+
+```bash
+# QC 角色访问完整报告
+curl "http://localhost:3000/api/reports/BGR202606071234?operator_type=QC"
+
+# 非 QC 角色访问（返回 403 错误）
+curl "http://localhost:3000/api/reports/BGR202606071234?operator_type=STORE"
+```
+
+**非 QC 角色错误响应：**
+```json
+{
+  "success": false,
+  "error": "权限不足：仅 QC 或管理员角色可查看完整报告内容。您当前仅可查看基础字段。"
+}
+```
+
+### 16.5 查询报告基础信息（无需特殊权限）
+
+```bash
+# 任何角色都可访问基础信息
+curl "http://localhost:3000/api/reports/BGR202606071234/basic?operator_type=STORE"
+```
+
+### 16.6 配置报告功能
+
+**关闭报告功能：**
+```bash
+curl -X POST http://localhost:3000/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "系统管理员",
+    "version": "v1.0.1",
+    "temp_min": 0,
+    "temp_max": 8,
+    "delivery_time_limit": 120,
+    "report_enabled": false,
+    "report_visible_fields": ["batch_no", "total_boxes", "status_summary"],
+    "acceptance_rules": {
+      "require_temperature_check": true,
+      "require_timestamp": true,
+      "max_acceptable_temp_deviation": 2,
+      "require_custodian_verification": true,
+      "allow_partial_acceptance": false
+    }
+  }'
+```
+
+**配置字段说明：**
+- `report_enabled`: 是否启用批次复盘报告功能，`true` 开启，`false` 关闭，默认 `true`
+- `report_visible_fields`: 报告可见字段白名单数组，QC/管理员角色可见所有白名单字段，其他角色仅可见基础字段
+
+**功能关闭时的响应：**
+```json
+{
+  "success": false,
+  "error": "批次复盘报告功能已关闭，请联系管理员开启"
+}
+```
+
+### 16.7 冲突类型说明
+
+报告生成时会自动检测以下冲突，但不会阻塞报告生成：
+
+| 冲突类型 | 严重程度 | 说明 |
+|---------|---------|------|
+| `PENDING_CORRECTIONS` | WARNING | 批次存在待审核的更正申请 |
+| `EXPORT_VERSION_MISMATCH` | INFO | 存在同一单据的多个导出版本 |
+
+### 16.8 审计日志
+
+报告相关操作会记录以下审计日志：
+
+| 操作类型 | 触发场景 |
+|---------|---------|
+| `BATCH_REPORT_GENERATE` | 成功生成批次复盘报告 |
+| `BATCH_REPORT_UNAUTHORIZED_ACCESS` | 非 QC/管理员角色尝试访问完整报告 |
+
+**查询报告相关审计日志：**
+```bash
+curl "http://localhost:3000/api/audit-logs?action=BATCH_REPORT_GENERATE"
+curl "http://localhost:3000/api/audit-logs?action=BATCH_REPORT_UNAUTHORIZED_ACCESS"
+```
+
+### 16.9 完整报告生成流程示例
+
+```bash
+#!/bin/bash
+
+BATCH_NO="BATCH-2026-0601-001"
+
+echo "=== 1. QC 生成批次复盘报告 ==="
+REPORT_RESULT=$(curl -s -X POST http://localhost:3000/api/reports/batch/${BATCH_NO} \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "赵质控",
+    "operator_type": "QC"
+  }')
+echo ${REPORT_RESULT} | python3 -m json.tool
+
+REPORT_NO=$(echo ${REPORT_RESULT} | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['report_no'])")
+echo "报告编号: ${REPORT_NO}"
+
+echo -e "\n=== 2. 验证报告包含完整字段 ==="
+curl -s "http://localhost:3000/api/reports/${REPORT_NO}?operator_type=QC" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+data = d['data']
+print(f'✓ 报告编号: {data[\"report_no\"]}')
+print(f'✓ 批次号: {data[\"batch_no\"]}')
+print(f'✓ 总箱数: {data[\"total_boxes\"]}')
+print(f'✓ 配置版本: {data[\"config_version\"]}')
+print(f'✓ 状态汇总: {json.dumps(data[\"status_summary\"], ensure_ascii=False)}')
+print(f'✓ 包含快照: {\"snapshot_data\" in data}')
+print(f'✓ 包含更正汇总: {\"corrections_summary\" in data}')
+print(f'✓ 包含导出单据: {\"exported_documents\" in data}')
+"
+
+echo -e "\n=== 3. 验证非 QC 角色仅见基础字段 ==="
+curl -s "http://localhost:3000/api/reports/${REPORT_NO}/basic?operator_type=STORE" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+data = d['data']
+visible_fields = list(data.keys())
+print(f'可见字段: {visible_fields}')
+print(f'✓ 不包含敏感字段: {\"snapshot_data\" not in data and \"corrections_summary\" not in data}')
+"
+
+echo -e "\n=== 4. 验证非 QC 访问完整报告被拒 ==="
+curl -s "http://localhost:3000/api/reports/${REPORT_NO}?operator_type=DRIVER" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f'错误信息: {d[\"error\"]}')
+print(f'✓ 返回 403 错误: {\"权限不足\" in d[\"error\"]}')
+"
+
+echo -e "\n=== 5. 查看审计日志 ==="
+curl -s "http://localhost:3000/api/audit-logs?action=BATCH_REPORT_GENERATE" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for log in d['data'][:1]:
+    details = json.loads(log['details']) if isinstance(log['details'], str) else log['details']
+    print(f'操作: {log[\"action\"]}')
+    print(f'  操作人: {log[\"operator\"]}')
+    print(f'  报告编号: {details.get(\"report_no\")}')
+    print(f'  批次号: {details.get(\"batch_no\")}')
+    print(f'  是否冲突: {details.get(\"has_conflicts\")}')
+"
+```
+
+---
+
 ## 内置样例数据
 
 服务首次启动会自动创建5个样例餐盒，覆盖不同状态：

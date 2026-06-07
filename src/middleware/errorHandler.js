@@ -31,12 +31,12 @@ const schemas = {
       'string.empty': '操作人不能为空',
       'any.required': '操作人是必填项'
     }),
-    operator_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM').required().messages({
-      'any.only': '操作人类型必须是 KITCHEN, DRIVER, STORE, QC, SYSTEM 之一',
+    operator_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'ADMIN', 'SYSTEM').required().messages({
+      'any.only': '操作人类型必须是 KITCHEN, DRIVER, STORE, QC, ADMIN, SYSTEM 之一',
       'any.required': '操作人类型是必填项'
     }),
     new_custodian: Joi.string().optional(),
-    new_custodian_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM').optional(),
+    new_custodian_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'ADMIN', 'SYSTEM').optional(),
     temperature: Joi.number().optional(),
     timestamp: Joi.string().optional(),
     remark: Joi.string().optional(),
@@ -94,8 +94,8 @@ const schemas = {
       'string.empty': '申请人不能为空',
       'any.required': '申请人是必填项'
     }),
-    applicant_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM').required().messages({
-      'any.only': '申请人类型必须是 KITCHEN, DRIVER, STORE, QC, SYSTEM 之一',
+    applicant_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'ADMIN', 'SYSTEM').required().messages({
+      'any.only': '申请人类型必须是 KITCHEN, DRIVER, STORE, QC, ADMIN, SYSTEM 之一',
       'any.required': '申请人类型是必填项'
     })
   }),
@@ -105,8 +105,8 @@ const schemas = {
       'string.empty': '审核人不能为空',
       'any.required': '审核人是必填项'
     }),
-    reviewer_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM').required().messages({
-      'any.only': '审核人类型必须是 KITCHEN, DRIVER, STORE, QC, SYSTEM 之一',
+    reviewer_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'ADMIN', 'SYSTEM').required().messages({
+      'any.only': '审核人类型必须是 KITCHEN, DRIVER, STORE, QC, ADMIN, SYSTEM 之一',
       'any.required': '审核人类型是必填项'
     }),
     review_result: Joi.string().valid('APPROVED', 'REJECTED').required().messages({
@@ -124,13 +124,24 @@ const schemas = {
       'string.empty': '操作人不能为空',
       'any.required': '操作人是必填项'
     }),
-    operator_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM').required().messages({
-      'any.only': '操作人类型必须是 KITCHEN, DRIVER, STORE, QC, SYSTEM 之一',
+    operator_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'ADMIN', 'SYSTEM').required().messages({
+      'any.only': '操作人类型必须是 KITCHEN, DRIVER, STORE, QC, ADMIN, SYSTEM 之一',
       'any.required': '操作人类型是必填项'
     }),
     reexport_reason: Joi.string().required().messages({
       'string.empty': '重新导出原因不能为空',
       'any.required': '重新导出原因是必填项'
+    })
+  }),
+
+  reportGenerateRequest: Joi.object({
+    operator: Joi.string().required().messages({
+      'string.empty': '操作人不能为空',
+      'any.required': '操作人是必填项'
+    }),
+    operator_type: Joi.string().valid('KITCHEN', 'DRIVER', 'STORE', 'QC', 'ADMIN', 'SYSTEM').required().messages({
+      'any.only': '操作人类型必须是 KITCHEN, DRIVER, STORE, QC, ADMIN, SYSTEM 之一',
+      'any.required': '操作人类型是必填项'
     })
   })
 };
@@ -221,7 +232,11 @@ function notFoundHandler(req, res) {
       'GET    /api/corrections/:id',
       'PUT    /api/corrections/:id/review',
       'GET    /api/corrections/batch/:batch_no/status',
-      'GET    /api/meta/correction-statuses'
+      'GET    /api/meta/correction-statuses',
+      'POST   /api/reports/batch/:batch_no',
+      'GET    /api/reports',
+      'GET    /api/reports/:report_no',
+      'GET    /api/reports/:report_no/basic'
     ]
   });
 }

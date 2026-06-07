@@ -33,6 +33,12 @@ const {
   getBatchCorrectionStatus,
   CORRECTION_STATUS
 } = require('../business/correctionService');
+const {
+  generateBatchReport,
+  getReportList,
+  getReportDetail,
+  getReportBasic
+} = require('../business/reportService');
 
 router.get('/health', asyncHandler(async (req, res) => {
   res.json({
@@ -282,6 +288,43 @@ router.get('/corrections/batch/:batch_no/status', asyncHandler(async (req, res) 
   res.json({
     success: true,
     data: status
+  });
+}));
+
+router.post('/reports/batch/:batch_no', validate('reportGenerateRequest'), asyncHandler(async (req, res) => {
+  const report = await generateBatchReport(
+    req.params.batch_no,
+    req.validatedBody.operator,
+    req.validatedBody.operator_type
+  );
+  res.json({
+    success: true,
+    data: report,
+    message: report.message
+  });
+}));
+
+router.get('/reports', asyncHandler(async (req, res) => {
+  const reports = await getReportList(req.query);
+  res.json({
+    success: true,
+    data: reports
+  });
+}));
+
+router.get('/reports/:report_no', asyncHandler(async (req, res) => {
+  const report = await getReportDetail(req.params.report_no, req.query.operator_type || 'STORE');
+  res.json({
+    success: true,
+    data: report
+  });
+}));
+
+router.get('/reports/:report_no/basic', asyncHandler(async (req, res) => {
+  const report = await getReportBasic(req.params.report_no, req.query.operator_type || 'STORE');
+  res.json({
+    success: true,
+    data: report
   });
 }));
 

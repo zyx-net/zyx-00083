@@ -31,7 +31,9 @@ function migrateTables() {
         { table: 'exported_documents', column: 'parent_doc_no', definition: 'TEXT' },
         { table: 'exported_documents', column: 'is_reexport', definition: 'INTEGER DEFAULT 0' },
         { table: 'exported_documents', column: 'reexport_reason', definition: 'TEXT' },
-        { table: 'exported_documents', column: 'version', definition: 'INTEGER DEFAULT 1' }
+        { table: 'exported_documents', column: 'version', definition: 'INTEGER DEFAULT 1' },
+        { table: 'configurations', column: 'report_enabled', definition: 'INTEGER DEFAULT 1' },
+        { table: 'configurations', column: 'report_visible_fields', definition: 'TEXT' }
       ];
 
       let completed = 0;
@@ -79,6 +81,8 @@ function initTables() {
         correction_review_time_limit INTEGER DEFAULT 24,
         correctable_fields_whitelist TEXT DEFAULT '["current_custodian","temperature","timestamp","operator","custodian_type"]',
         allow_reexport INTEGER DEFAULT 1,
+        report_enabled INTEGER DEFAULT 1,
+        report_visible_fields TEXT,
         created_at TEXT NOT NULL,
         is_active INTEGER DEFAULT 0
       )`);
@@ -170,6 +174,20 @@ function initTables() {
         expires_at TEXT NOT NULL,
         conflict_warning INTEGER DEFAULT 0,
         FOREIGN KEY (box_no) REFERENCES boxes(box_no)
+      )`);
+
+      db.run(`CREATE TABLE IF NOT EXISTS batch_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_no TEXT NOT NULL UNIQUE,
+        batch_no TEXT NOT NULL,
+        config_version TEXT NOT NULL,
+        report_content TEXT NOT NULL,
+        snapshot_data TEXT NOT NULL,
+        generated_at TEXT NOT NULL,
+        generated_by TEXT NOT NULL,
+        generated_by_type TEXT NOT NULL,
+        has_conflicts INTEGER DEFAULT 0,
+        conflict_warnings TEXT
       )`, (err) => {
         if (err) reject(err);
         else {

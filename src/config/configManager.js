@@ -1,6 +1,13 @@
 const { get, run, all } = require('../database/init');
 const moment = require('moment');
 
+const DEFAULT_REPORT_VISIBLE_FIELDS = [
+  'batch_no', 'total_boxes', 'status_summary', 'handover_timestamps',
+  'temperature_abnormalities', 'isolation_reasons', 'corrections_summary',
+  'exported_documents', 'conflict_warnings', 'config_version',
+  'generated_at', 'generated_by', 'has_conflicts', 'conflict_details'
+];
+
 const DEFAULT_CONFIG = {
   version: 'v1.0.0',
   temp_min: 0,
@@ -15,7 +22,9 @@ const DEFAULT_CONFIG = {
   }),
   correction_review_time_limit: 24,
   correctable_fields_whitelist: JSON.stringify(['current_custodian', 'temperature', 'timestamp', 'operator', 'custodian_type']),
-  allow_reexport: 1
+  allow_reexport: 1,
+  report_enabled: 1,
+  report_visible_fields: JSON.stringify(DEFAULT_REPORT_VISIBLE_FIELDS)
 };
 
 async function initConfig() {
@@ -40,8 +49,8 @@ async function initConfig() {
   }
 
   await run(
-    `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, allow_reexport, created_at, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, allow_reexport, report_enabled, report_visible_fields, created_at, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
     [
       DEFAULT_CONFIG.version,
       DEFAULT_CONFIG.temp_min,
@@ -51,6 +60,8 @@ async function initConfig() {
       DEFAULT_CONFIG.correction_review_time_limit,
       DEFAULT_CONFIG.correctable_fields_whitelist,
       DEFAULT_CONFIG.allow_reexport,
+      DEFAULT_CONFIG.report_enabled,
+      DEFAULT_CONFIG.report_visible_fields,
       moment().format('YYYY-MM-DD HH:mm:ss')
     ]
   );
@@ -67,7 +78,9 @@ async function getActiveConfig() {
     ...config,
     acceptance_rules: JSON.parse(config.acceptance_rules),
     correctable_fields_whitelist: config.correctable_fields_whitelist ? JSON.parse(config.correctable_fields_whitelist) : [],
-    allow_reexport: config.allow_reexport !== undefined ? config.allow_reexport === 1 : true
+    allow_reexport: config.allow_reexport !== undefined ? config.allow_reexport === 1 : true,
+    report_enabled: config.report_enabled !== undefined ? config.report_enabled === 1 : true,
+    report_visible_fields: config.report_visible_fields ? JSON.parse(config.report_visible_fields) : DEFAULT_REPORT_VISIBLE_FIELDS
   };
 }
 
@@ -77,6 +90,8 @@ async function getConfigByVersion(version) {
     config.acceptance_rules = JSON.parse(config.acceptance_rules);
     config.correctable_fields_whitelist = config.correctable_fields_whitelist ? JSON.parse(config.correctable_fields_whitelist) : [];
     config.allow_reexport = config.allow_reexport !== undefined ? config.allow_reexport === 1 : true;
+    config.report_enabled = config.report_enabled !== undefined ? config.report_enabled === 1 : true;
+    config.report_visible_fields = config.report_visible_fields ? JSON.parse(config.report_visible_fields) : DEFAULT_REPORT_VISIBLE_FIELDS;
   }
   return config;
 }
@@ -87,7 +102,9 @@ async function getAllConfigs() {
     ...c,
     acceptance_rules: JSON.parse(c.acceptance_rules),
     correctable_fields_whitelist: c.correctable_fields_whitelist ? JSON.parse(c.correctable_fields_whitelist) : [],
-    allow_reexport: c.allow_reexport !== undefined ? c.allow_reexport === 1 : true
+    allow_reexport: c.allow_reexport !== undefined ? c.allow_reexport === 1 : true,
+    report_enabled: c.report_enabled !== undefined ? c.report_enabled === 1 : true,
+    report_visible_fields: c.report_visible_fields ? JSON.parse(c.report_visible_fields) : DEFAULT_REPORT_VISIBLE_FIELDS
   }));
 }
 
@@ -95,8 +112,8 @@ async function addNewConfig(newConfig, operator) {
   await run('UPDATE configurations SET is_active = 0 WHERE is_active = 1');
   
   const result = await run(
-    `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, allow_reexport, created_at, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, allow_reexport, report_enabled, report_visible_fields, created_at, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
     [
       newConfig.version,
       newConfig.temp_min,
@@ -106,6 +123,8 @@ async function addNewConfig(newConfig, operator) {
       newConfig.correction_review_time_limit || 24,
       JSON.stringify(newConfig.correctable_fields_whitelist || ['current_custodian', 'temperature', 'timestamp', 'operator', 'custodian_type']),
       newConfig.allow_reexport !== undefined ? (newConfig.allow_reexport ? 1 : 0) : 1,
+      newConfig.report_enabled !== undefined ? (newConfig.report_enabled ? 1 : 0) : 1,
+      JSON.stringify(newConfig.report_visible_fields || DEFAULT_REPORT_VISIBLE_FIELDS),
       moment().format('YYYY-MM-DD HH:mm:ss')
     ]
   );
@@ -130,5 +149,6 @@ module.exports = {
   getConfigByVersion,
   getAllConfigs,
   addNewConfig,
-  DEFAULT_CONFIG
+  DEFAULT_CONFIG,
+  DEFAULT_REPORT_VISIBLE_FIELDS
 };

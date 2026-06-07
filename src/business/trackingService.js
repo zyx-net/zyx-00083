@@ -16,7 +16,9 @@ const CUSTODIAN_TYPES = {
   KITCHEN: '厨房',
   DRIVER: '司机',
   STORE: '门店',
-  QC: '质控'
+  QC: '质控',
+  ADMIN: '管理员',
+  SYSTEM: '系统'
 };
 
 class AppError extends Error {

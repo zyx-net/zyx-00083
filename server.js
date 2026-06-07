@@ -40,6 +40,7 @@ app.get('/', (req, res) => {
       audit_logs: '/api/audit-logs',
       exceptions: '/api/exceptions',
       export: '/api/export/handover/:box_no',
+      reports: '/api/reports/batch/:batch_no',
       meta: '/api/meta/statuses'
     }
   });
@@ -91,9 +92,16 @@ async function startServer() {
       console.log('  - 历史单据快照永久保存，不会被后续更正改写');
       console.log('  - 服务重启后快照保持一致');
       console.log('  - 重新导出功能: ' + (activeConfig.allow_reexport ? '已开启 (默认)' : '已关闭'));
-      console.log('  - 重新导出权限: 仅 QC 可操作');
-      console.log('=========================================');
-    });
+    console.log('  - 重新导出权限: 仅 QC 可操作');
+    console.log('=========================================');
+    console.log('批次复盘报告能力:');
+    console.log('  - 报告功能: ' + (activeConfig.report_enabled ? '已开启 (默认)' : '已关闭'));
+    console.log('  - 可见字段白名单: ' + (activeConfig.report_visible_fields?.length || 0) + ' 个字段');
+    console.log('  - 快照存储: 每次生成报告自动保存数据快照');
+    console.log('  - 权限控制: 非 QC/管理员仅可查看基础字段');
+    console.log('  - 冲突检测: 待审更正、导出版本不一致自动提示');
+    console.log('=========================================');
+  });
   } catch (err) {
     console.error('服务启动失败:', err);
     process.exit(1);

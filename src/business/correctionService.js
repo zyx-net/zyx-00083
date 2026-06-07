@@ -18,9 +18,11 @@ const RECORD_TYPES = {
 
 const ROLE_PERMISSIONS = {
   QC: { can_review: true, can_submit: true, reviewable_types: ['status_history', 'temperature', 'box'] },
+  ADMIN: { can_review: true, can_submit: true, reviewable_types: ['status_history', 'temperature', 'box'] },
   KITCHEN: { can_review: false, can_submit: false, reviewable_types: [] },
   DRIVER: { can_review: false, can_submit: true, reviewable_types: [] },
-  STORE: { can_review: false, can_submit: true, reviewable_types: [] }
+  STORE: { can_review: false, can_submit: true, reviewable_types: [] },
+  SYSTEM: { can_review: false, can_submit: false, reviewable_types: [] }
 };
 
 function generateCorrectionNo() {
@@ -184,7 +186,7 @@ async function validateProposedValue(fieldName, proposedValue, recordType, confi
       }
       break;
     case 'custodian_type':
-      const validTypes = ['KITCHEN', 'DRIVER', 'STORE', 'QC', 'SYSTEM'];
+      const validTypes = ['KITCHEN', 'DRIVER', 'STORE', 'QC', 'ADMIN', 'SYSTEM'];
       if (!validTypes.includes(proposedValue)) {
         throw new AppError(`保管人类型必须是 ${validTypes.join(', ')} 之一`);
       }
