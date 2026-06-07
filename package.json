@@ -1,0 +1,16 @@
+{
+  "name": "cold-chain-meal-tracking-api",
+  "version": "1.0.0",
+  "description": "冷链餐盒交付追踪API - 管理团餐餐盒从出餐到归档的全流程",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sqlite3": "^5.1.7",
+    "joi": "^17.12.2",
+    "moment": "^2.30.1"
+  }
+}
