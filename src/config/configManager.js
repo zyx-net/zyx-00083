@@ -19,27 +19,42 @@ const DEFAULT_CONFIG = {
 };
 
 async function initConfig() {
-  const existing = await get('SELECT * FROM configurations WHERE is_active = 1');
-  if (!existing) {
-    await run(
-      `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, allow_reexport, created_at, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-      [
-        DEFAULT_CONFIG.version,
-        DEFAULT_CONFIG.temp_min,
-        DEFAULT_CONFIG.temp_max,
-        DEFAULT_CONFIG.delivery_time_limit,
-        DEFAULT_CONFIG.acceptance_rules,
-        DEFAULT_CONFIG.correction_review_time_limit,
-        DEFAULT_CONFIG.correctable_fields_whitelist,
-        DEFAULT_CONFIG.allow_reexport,
-        moment().format('YYYY-MM-DD HH:mm:ss')
-      ]
-    );
-    console.log('默认配置已加载，版本:', DEFAULT_CONFIG.version);
-  } else {
-    console.log('当前活动配置版本:', existing.version);
+  let activeConfig = await get('SELECT * FROM configurations WHERE is_active = 1');
+  if (activeConfig) {
+    console.log('当前活动配置版本:', activeConfig.version);
+    return;
   }
+
+  const v1Config = await get('SELECT * FROM configurations WHERE version = ?', [DEFAULT_CONFIG.version]);
+  if (v1Config) {
+    await run('UPDATE configurations SET is_active = 1 WHERE version = ?', [DEFAULT_CONFIG.version]);
+    console.log('已恢复默认配置为活动状态，版本:', DEFAULT_CONFIG.version);
+    return;
+  }
+
+  const anyConfig = await get('SELECT * FROM configurations ORDER BY created_at DESC LIMIT 1');
+  if (anyConfig) {
+    await run('UPDATE configurations SET is_active = 1 WHERE id = ?', [anyConfig.id]);
+    console.log('已恢复最新配置为活动状态，版本:', anyConfig.version);
+    return;
+  }
+
+  await run(
+    `INSERT INTO configurations (version, temp_min, temp_max, delivery_time_limit, acceptance_rules, correction_review_time_limit, correctable_fields_whitelist, allow_reexport, created_at, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    [
+      DEFAULT_CONFIG.version,
+      DEFAULT_CONFIG.temp_min,
+      DEFAULT_CONFIG.temp_max,
+      DEFAULT_CONFIG.delivery_time_limit,
+      DEFAULT_CONFIG.acceptance_rules,
+      DEFAULT_CONFIG.correction_review_time_limit,
+      DEFAULT_CONFIG.correctable_fields_whitelist,
+      DEFAULT_CONFIG.allow_reexport,
+      moment().format('YYYY-MM-DD HH:mm:ss')
+    ]
+  );
+  console.log('默认配置已加载，版本:', DEFAULT_CONFIG.version);
 }
 
 async function getActiveConfig() {

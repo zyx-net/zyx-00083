@@ -1105,22 +1105,201 @@ curl "http://localhost:3000/api/audit-logs?box_no=BOX-MAIN-001"
 # 验证温度记录（从详情中查看）
 curl http://localhost:3000/api/boxes/BOX-MAIN-001
 
-# 验证导出历史
+# 验证导出历史（包含更正快照）
 curl http://localhost:3000/api/export-history
+
+# 验证导出单据快照不变性（重启后查询同一单据，快照应保持不变）
+curl http://localhost:3000/api/export/HJD202606071234
 
 # 验证更正申请数据
 curl http://localhost:3000/api/corrections
 
-# 验证更正配置（审核时限、可更正字段）
+# 验证更正配置（审核时限、可更正字段、重新导出开关）
 curl http://localhost:3000/api/config
 
 # 验证批次更正状态
 curl http://localhost:3000/api/corrections/batch/BATCH-CORR-TEST-001/status
 
-# 验证异常清单导出包含更正状态
+# 验证异常清单导出包含更正状态和快照
 curl -X POST http://localhost:3000/api/export/exceptions \
   -H "Content-Type: application/json" \
   -d '{"operator": "系统管理员"}'
+
+# 验证重新导出审计日志
+curl "http://localhost:3000/api/audit-logs?action=DOCUMENT_REEXPORT"
+```
+
+## 十五、导出更正追溯完整流程示例
+
+```bash
+#!/bin/bash
+
+BOX_NO="BOX-EXPORT-TEST-001"
+BATCH_NO="BATCH-EXPORT-TEST-001"
+
+echo "=== 1. 创建测试餐盒并流转 ==="
+curl -X POST http://localhost:3000/api/boxes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "box_no": "'${BOX_NO}'",
+    "batch_no": "'${BATCH_NO}'",
+    "kitchen_staff": "李厨师",
+    "meal_items": [{"name": "红烧肉套餐", "quantity": 2, "price": 35}]
+  }'
+
+curl -X PUT http://localhost:3000/api/boxes/${BOX_NO}/status/MEAL_PREPARED \
+  -H "Content-Type: application/json" \
+  -d '{"operator": "李厨师", "operator_type": "KITCHEN"}'
+
+curl -X PUT http://localhost:3000/api/boxes/${BOX_NO}/status/BOXED \
+  -H "Content-Type: application/json" \
+  -d '{"operator": "李厨师", "operator_type": "KITCHEN"}'
+
+curl -X PUT http://localhost:3000/api/boxes/${BOX_NO}/status/DRIVER_RECEIVED \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "李厨师",
+    "operator_type": "KITCHEN",
+    "new_custodian": "王司机",
+    "new_custodian_type": "DRIVER",
+    "temperature": 4.5
+  }'
+
+echo -e "\n=== 2. 上报温度（模拟异常） ==="
+curl -X POST http://localhost:3000/api/temperature \
+  -H "Content-Type: application/json" \
+  -d '{
+    "box_no": "'${BOX_NO}'",
+    "temperature": 15.0,
+    "timestamp": "2026-06-07 13:00:00",
+    "recorded_by": "王司机"
+  }'
+
+echo -e "\n=== 3. 司机提交更正申请 ==="
+BOX_DETAIL=$(curl -s http://localhost:3000/api/boxes/${BOX_NO})
+TEMP_RECORD_ID=$(echo ${BOX_DETAIL} | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['temperature_readings'][0]['id'])")
+
+curl -X POST http://localhost:3000/api/corrections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "box_no": "'${BOX_NO}'",
+    "record_type": "temperature",
+    "record_id": '${TEMP_RECORD_ID}',
+    "field_name": "temperature",
+    "proposed_value": "4.8",
+    "apply_reason": "温度单位误操作",
+    "applicant": "王司机",
+    "applicant_type": "DRIVER"
+  }'
+
+echo -e "\n=== 4. 导出交接单（包含更正快照） ==="
+EXPORT_RESULT=$(curl -s -X POST http://localhost:3000/api/export/handover/${BOX_NO} \
+  -H "Content-Type: application/json" \
+  -d '{"operator": "王店长"}')
+echo ${EXPORT_RESULT} | python3 -m json.tool
+
+DOC_NO=$(echo ${EXPORT_RESULT} | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['doc_no'])")
+echo "导出单据号: ${DOC_NO}"
+
+echo -e "\n=== 5. 验证导出单据包含更正快照 ==="
+curl -s http://localhost:3000/api/export/${DOC_NO} | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+snapshot = d['data'].get('correction_snapshot')
+if snapshot:
+    print('✓ 更正快照存在')
+    print(f'  快照时间: {snapshot[\"snapshot_time\"]}')
+    print(f'  更正总数: {snapshot[\"overall\"][\"total_corrections\"]}')
+    print(f'  待审核: {snapshot[\"overall\"][\"pending_count\"]}')
+    batch_key = list(snapshot['batch_summaries'].keys())[0]
+    batch = snapshot['batch_summaries'][batch_key]
+    if batch['latest_reviewer']:
+        print(f'  最近审核人: {batch[\"latest_reviewer\"]}')
+    else:
+        print('  暂无审核记录')
+else:
+    print('✗ 更正快照不存在')
+"
+
+echo -e "\n=== 6. QC审核更正申请 ==="
+CORR_LIST=$(curl -s "http://localhost:3000/api/corrections?box_no=${BOX_NO}&status=PENDING")
+CORRECTION_ID=$(echo ${CORR_LIST} | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
+
+curl -X PUT http://localhost:3000/api/corrections/${CORRECTION_ID}/review \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reviewer": "赵质控",
+    "reviewer_type": "QC",
+    "review_result": "APPROVED",
+    "review_reason": "经核实，温度记录确实有误"
+  }'
+
+echo -e "\n=== 7. 验证历史单据快照未被改写 ==="
+curl -s http://localhost:3000/api/export/${DOC_NO} | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+snapshot = d['data'].get('correction_snapshot')
+if snapshot:
+    pending = snapshot['overall']['pending_count']
+    approved = snapshot['overall']['approved_count']
+    print(f'✓ 历史快照 - 待审核: {pending}, 已通过: {approved}')
+    if pending == 1 and approved == 0:
+        print('✓ 快照保持不变，未被后续审核改写')
+    else:
+        print('✗ 快照被改写了！')
+"
+
+echo -e "\n=== 8. QC重新导出（更新快照） ==="
+REEXPORT_RESULT=$(curl -s -X POST http://localhost:3000/api/export/${DOC_NO}/reexport \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "赵质控",
+    "operator_type": "QC",
+    "reexport_reason": "更正已审核通过，更新单据快照"
+  }')
+echo ${REEXPORT_RESULT} | python3 -m json.tool
+
+NEW_DOC_NO=$(echo ${REEXPORT_RESULT} | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['new_doc_no'])")
+echo "新单据号: ${NEW_DOC_NO}"
+
+echo -e "\n=== 9. 验证新单据快照已更新 ==="
+curl -s http://localhost:3000/api/export/${NEW_DOC_NO} | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+snapshot = d['data'].get('correction_snapshot')
+if snapshot:
+    pending = snapshot['overall']['pending_count']
+    approved = snapshot['overall']['approved_count']
+    print(f'✓ 新快照 - 待审核: {pending}, 已通过: {approved}')
+    if pending == 0 and approved == 1:
+        print('✓ 新快照已更新，反映最新审核状态')
+    else:
+        print('✗ 快照未正确更新')
+"
+
+echo -e "\n=== 10. 验证非QC角色重新导出被拒 ==="
+curl -s -X POST http://localhost:3000/api/export/${DOC_NO}/reexport \
+  -H "Content-Type: application/json" \
+  -d '{
+    "operator": "王司机",
+    "operator_type": "DRIVER",
+    "reexport_reason": "测试非QC权限"
+  }' | python3 -m json.tool
+
+echo -e "\n=== 11. 查看审计日志 ==="
+curl -s "http://localhost:3000/api/audit-logs?action=DOCUMENT_REEXPORT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for log in d['data']:
+    details = json.loads(log['details']) if isinstance(log['details'], str) else log['details']
+    print(f'操作: {log[\"action\"]}')
+    print(f'  操作人: {log[\"operator\"]}')
+    print(f'  旧单据: {details.get(\"old_doc_no\")}')
+    print(f'  新单据: {details.get(\"new_doc_no\")}')
+    print(f'  原因: {details.get(\"reexport_reason\")}')
+    print(f'  更正摘要: {details.get(\"correction_summary\")}')
+    print()
+"
 ```
 
 ---
